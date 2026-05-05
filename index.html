@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>🎾 Tennis Match Tracker – Balanced Edition</title>
+  <title>🎾 Tennis Match Tracker – Points Leaderboard</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -43,38 +43,33 @@
     ];
 
     // ---------- BALANCED MATCH GENERATOR ----------
-    // Generates all possible distinct doubles matches (unordered pairs of pairs)
     function getAllPossibleMatches(players) {
       const matches = [];
       const n = players.length;
-      // iterate over all combinations of 4 distinct players
       for (let i = 0; i < n; i++) {
         for (let j = i+1; j < n; j++) {
           for (let k = j+1; k < n; k++) {
             for (let l = k+1; l < n; l++) {
               const four = [players[i], players[j], players[k], players[l]];
-              // generate the 3 distinct pairings
               const pairings = [
                 [[four[0], four[1]], [four[2], four[3]]],
                 [[four[0], four[2]], [four[1], four[3]]],
                 [[four[0], four[3]], [four[1], four[2]]]
               ];
               for (let [t1, t2] of pairings) {
-                // canonical order: sort each team, then sort teams lexicographically
                 t1 = [...t1].sort();
                 t2 = [...t2].sort();
                 const teamKey = [t1, t2].sort((a,b) => a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]));
                 matches.push({
                   t1: teamKey[0],
                   t2: teamKey[1],
-                  players: four.slice() // all 4 players
+                  players: four.slice()
                 });
               }
             }
           }
         }
       }
-      // remove duplicates (same teams but swapped?) – our canonical ordering ensures uniqueness
       const unique = [];
       const keySet = new Set();
       for (const m of matches) {
@@ -87,61 +82,32 @@
       return unique;
     }
 
-    // Greedy selection: pick matches that keep player appearance counts as balanced as possible
     function selectBalancedMatches(allMatches, totalMatches, players) {
       if (totalMatches === 0) return [];
       if (allMatches.length === 0) return [];
-      
-      // counts per player
       const counts = Object.fromEntries(players.map(p => [p, 0]));
       const selected = [];
-      
-      // If totalMatches exceeds available unique matches, we will repeat from the pool
-      // but we first use all unique matches once, then cycle (rare for typical inputs)
       let availablePool = [...allMatches];
-      
       for (let mIdx = 0; mIdx < totalMatches; mIdx++) {
-        if (availablePool.length === 0) {
-          // replenish pool with all matches (but keep counts growing)
-          availablePool = [...allMatches];
-        }
-        
+        if (availablePool.length === 0) availablePool = [...allMatches];
         let bestMatch = null;
         let bestScore = Infinity;
-        // Evaluate each candidate match in the pool
         for (const match of availablePool) {
-          // compute new counts if we add this match
           const newCounts = { ...counts };
-          for (const p of match.players) {
-            newCounts[p] += 1;
-          }
-          // score = variance (sum of squares) – lower is more balanced
+          for (const p of match.players) newCounts[p] += 1;
           let sumSq = 0;
-          for (const p of players) {
-            sumSq += newCounts[p] * newCounts[p];
-          }
+          for (const p of players) sumSq += newCounts[p] * newCounts[p];
           if (sumSq < bestScore) {
             bestScore = sumSq;
             bestMatch = match;
-          } else if (sumSq === bestScore && bestMatch) {
-            // random tie-break to avoid identical patterns every time
-            if (Math.random() < 0.5) bestMatch = match;
-          }
+          } else if (sumSq === bestScore && bestMatch && Math.random() < 0.5) bestMatch = match;
         }
-        
         if (bestMatch) {
-          // update counts
-          for (const p of bestMatch.players) {
-            counts[p] += 1;
-          }
+          for (const p of bestMatch.players) counts[p] += 1;
           selected.push({ id: selected.length + 1, t1: bestMatch.t1, t2: bestMatch.t2, out: players.filter(p => !bestMatch.players.includes(p)) });
-          // remove the selected match from pool to avoid immediate duplicate (optional)
           const idx = availablePool.indexOf(bestMatch);
           if (idx !== -1) availablePool.splice(idx, 1);
-        } else {
-          // fallback (should never happen)
-          break;
-        }
+        } else break;
       }
       return selected;
     }
@@ -152,7 +118,7 @@
       return selectBalancedMatches(allPossible, totalMatches, players);
     }
 
-    // ---------- GAME RULES (unchanged) ----------
+    // ---------- GAME RULES ----------
     function getPhase(s1, s2, prevPhase) {
       const total = s1 + s2;
       if (prevPhase === "sudden") return { label: "WINNER!", phase: "done" };
@@ -195,7 +161,7 @@
       return (
         <div style={{minHeight:"100vh",background:"#0a0e1a",fontFamily:"'Oswald',sans-serif",color:"#f0f0f0",padding:"0 0 60px"}}>
           <div style={{background:"linear-gradient(135deg,#0f1923,#1a2535)",borderBottom:"3px solid #7CFC00",padding:"20px",textAlign:"center"}}>
-            <div style={{fontSize:11,color:"#7CFC00",letterSpacing:5,marginBottom:4}}>DOUBLES TENNIS – BALANCED MATCHES</div>
+            <div style={{fontSize:11,color:"#7CFC00",letterSpacing:5,marginBottom:4}}>DOUBLES TENNIS – POINTS LEADERBOARD</div>
             <div style={{fontSize:32,fontWeight:700}}>MATCH SETUP</div>
           </div>
           <div style={{maxWidth:500,margin:"0 auto",padding:"24px 20px"}}>
@@ -263,11 +229,32 @@
       }
 
       const completedCount = Object.values(scores).filter(s => s.done).length;
-      const leaderboard = players.map(p => ({
-        name: p,
-        wins: matches.filter(m => scores[m.id].winner?.includes(p)).length,
-        played: matches.filter(m => scores[m.id].done && (m.t1.includes(p) || m.t2.includes(p))).length
-      })).sort((a, b) => b.wins - a.wins || b.played - a.played);
+      
+      // ----- NEW POINTS-BASED LEADERBOARD -----
+      const leaderboard = players.map(p => {
+        let totalPoints = 0;
+        let wins = 0;
+        let played = 0;
+        matches.forEach(m => {
+          const sc = scores[m.id];
+          if (sc.done) {
+            const team1Points = sc.s1;
+            const team2Points = sc.s2;
+            const inTeam1 = m.t1.includes(p);
+            const inTeam2 = m.t2.includes(p);
+            if (inTeam1 || inTeam2) {
+              played++;
+              const pointsEarned = inTeam1 ? team1Points : team2Points;
+              totalPoints += pointsEarned;
+              const isWinner = (team1Points > team2Points && inTeam1) || (team2Points > team1Points && inTeam2);
+              if (isWinner) wins++;
+            }
+          }
+        });
+        return { name: p, points: totalPoints, wins, played };
+      }).sort((a, b) => b.points - a.points || b.wins - a.wins);
+      
+      const maxPoints = leaderboard.length ? leaderboard[0].points : 1;
 
       const phaseColors = { done:"#7CFC00", extra:"#ff6b6b", deuce:"#ff8c00", sudden:"#cc0000", live:"#1f2937" };
       const phaseEmojis = { done:"🏆", extra:"⚡", deuce:"🔥", sudden:"💀", live:"●" };
@@ -301,7 +288,7 @@
             <div style={{display:"flex",borderBottom:"1px solid #1f2937"}}>
               {["matches","leaderboard"].map(v => (
                 <button key={v} onClick={() => setView(v)} style={{background:"none",border:"none",color:view===v?"#7CFC00":"#555",fontSize:12,fontFamily:"Oswald,sans-serif",letterSpacing:3,fontWeight:600,padding:"12px 18px",cursor:"pointer",textTransform:"uppercase",borderBottom:view===v?"2px solid #7CFC00":"2px solid transparent",transition:"all 0.2s"}}>
-                  {v === "matches" ? "🎾 Matches" : "🏆 Leaderboard"}
+                  {v === "matches" ? "🎾 Matches" : "🏆 Points Leaderboard"}
                 </button>
               ))}
             </div>
@@ -384,26 +371,23 @@
 
             {view === "leaderboard" && (
               <div style={{paddingTop:18,paddingBottom:50}}>
-                {leaderboard.map((p, i) => {
-                  const maxW = leaderboard[0].wins || 1;
-                  return (
-                    <div key={p.name} style={{background:i===0&&p.wins>0?"linear-gradient(135deg,#0d2210,#111827)":"#111827",border:i===0&&p.wins>0?"1px solid #2d5a2d":"1px solid #1f2937",borderRadius:10,padding:"12px 16px",marginBottom:8,display:"flex",alignItems:"center",gap:12}}>
-                      <div style={{width:30,height:30,borderRadius:"50%",background:i===0&&p.wins>0?"#7CFC00":"#1f2937",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:i===0&&p.wins>0?"#000":"#555",flexShrink:0}}>{i+1}</div>
-                      <div style={{flex:1}}>
-                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
-                          <span style={{fontSize:15,fontWeight:600,color:colorMap[p.name]}}>{p.name}</span>
-                          <span style={{fontFamily:"Roboto Mono",fontSize:13}}>
-                            <span style={{color:"#7CFC00",fontWeight:700}}>{p.wins}W</span>
-                            <span style={{color:"#444"}}> / {p.played} played</span>
-                          </span>
-                        </div>
-                        <div style={{background:"#0a0e1a",borderRadius:4,height:5}}>
-                          <div style={{height:"100%",width:`${(p.wins/maxW)*100}%`,background:colorMap[p.name],borderRadius:4,transition:"width 0.5s"}} />
-                        </div>
+                {leaderboard.map((p, i) => (
+                  <div key={p.name} style={{background:i===0 && p.points>0?"linear-gradient(135deg,#0d2210,#111827)":"#111827",border:i===0 && p.points>0?"1px solid #2d5a2d":"1px solid #1f2937",borderRadius:10,padding:"12px 16px",marginBottom:8,display:"flex",alignItems:"center",gap:12}}>
+                    <div style={{width:36,height:36,borderRadius:"50%",background:i===0 && p.points>0?"#7CFC00":"#1f2937",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:700,color:i===0 && p.points>0?"#000":"#555",flexShrink:0}}>{i+1}</div>
+                    <div style={{flex:1}}>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                        <span style={{fontSize:16,fontWeight:600,color:colorMap[p.name]}}>{p.name}</span>
+                        <span style={{fontFamily:"Roboto Mono",fontSize:13}}>
+                          <span style={{color:"#7CFC00",fontWeight:700}}>{p.points} PTS</span>
+                          <span style={{color:"#444"}}> · {p.wins}W / {p.played} played</span>
+                        </span>
+                      </div>
+                      <div style={{background:"#0a0e1a",borderRadius:4,height:5}}>
+                        <div style={{height:"100%",width:`${(p.points / maxPoints) * 100}%`,background:colorMap[p.name],borderRadius:4,transition:"width 0.5s"}} />
                       </div>
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
                 <div style={{marginTop:20,background:"#111827",border:"1px solid #1f2937",borderRadius:10,padding:"14px 16px"}}>
                   <div style={{fontSize:10,color:"#555",letterSpacing:3,marginBottom:12}}>SESSION SUMMARY</div>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,textAlign:"center"}}>
