@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>🎾 Tennis Match Tracker</title>
+  <title>🎾 Tennis Match Tracker – Balanced Edition</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -42,36 +42,119 @@
       "#C39BD3","#82E0AA","#F9E79F","#FAD7A0","#AED6F1","#A9DFBF"
     ];
 
-    function shuffle(arr) {
-      const a = [...arr];
-      for (let i = a.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [a[i], a[j]] = [a[j], a[i]];
-      }
-      return a;
-    }
-
-    function generateMatches(players, totalMatches) {
-      if (players.length < 4) return [];
+    // ---------- BALANCED MATCH GENERATOR ----------
+    // Generates all possible distinct doubles matches (unordered pairs of pairs)
+    function getAllPossibleMatches(players) {
       const matches = [];
-      let attempts = 0;
-      while (matches.length < totalMatches && attempts < totalMatches * 50) {
-        attempts++;
-        const s = shuffle(players);
-        const t1 = [s[0], s[1]];
-        const t2 = [s[2], s[3]];
-        matches.push({ id: matches.length + 1, t1, t2, out: players.filter(p => !t1.includes(p) && !t2.includes(p)) });
+      const n = players.length;
+      // iterate over all combinations of 4 distinct players
+      for (let i = 0; i < n; i++) {
+        for (let j = i+1; j < n; j++) {
+          for (let k = j+1; k < n; k++) {
+            for (let l = k+1; l < n; l++) {
+              const four = [players[i], players[j], players[k], players[l]];
+              // generate the 3 distinct pairings
+              const pairings = [
+                [[four[0], four[1]], [four[2], four[3]]],
+                [[four[0], four[2]], [four[1], four[3]]],
+                [[four[0], four[3]], [four[1], four[2]]]
+              ];
+              for (let [t1, t2] of pairings) {
+                // canonical order: sort each team, then sort teams lexicographically
+                t1 = [...t1].sort();
+                t2 = [...t2].sort();
+                const teamKey = [t1, t2].sort((a,b) => a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]));
+                matches.push({
+                  t1: teamKey[0],
+                  t2: teamKey[1],
+                  players: four.slice() // all 4 players
+                });
+              }
+            }
+          }
+        }
       }
-      return matches;
+      // remove duplicates (same teams but swapped?) – our canonical ordering ensures uniqueness
+      const unique = [];
+      const keySet = new Set();
+      for (const m of matches) {
+        const key = `${m.t1.join(',')}|${m.t2.join(',')}`;
+        if (!keySet.has(key)) {
+          keySet.add(key);
+          unique.push(m);
+        }
+      }
+      return unique;
     }
 
-    // All 4 players serve once = 4 total points in a normal game.
-    // Possible normal outcomes: 4-0, 3-1 (winner), 2-2 (extra round).
-    // Extra round: one more serve. If still tied -> Deuce. Still tied -> Sudden Death (next point wins).
+    // Greedy selection: pick matches that keep player appearance counts as balanced as possible
+    function selectBalancedMatches(allMatches, totalMatches, players) {
+      if (totalMatches === 0) return [];
+      if (allMatches.length === 0) return [];
+      
+      // counts per player
+      const counts = Object.fromEntries(players.map(p => [p, 0]));
+      const selected = [];
+      
+      // If totalMatches exceeds available unique matches, we will repeat from the pool
+      // but we first use all unique matches once, then cycle (rare for typical inputs)
+      let availablePool = [...allMatches];
+      
+      for (let mIdx = 0; mIdx < totalMatches; mIdx++) {
+        if (availablePool.length === 0) {
+          // replenish pool with all matches (but keep counts growing)
+          availablePool = [...allMatches];
+        }
+        
+        let bestMatch = null;
+        let bestScore = Infinity;
+        // Evaluate each candidate match in the pool
+        for (const match of availablePool) {
+          // compute new counts if we add this match
+          const newCounts = { ...counts };
+          for (const p of match.players) {
+            newCounts[p] += 1;
+          }
+          // score = variance (sum of squares) – lower is more balanced
+          let sumSq = 0;
+          for (const p of players) {
+            sumSq += newCounts[p] * newCounts[p];
+          }
+          if (sumSq < bestScore) {
+            bestScore = sumSq;
+            bestMatch = match;
+          } else if (sumSq === bestScore && bestMatch) {
+            // random tie-break to avoid identical patterns every time
+            if (Math.random() < 0.5) bestMatch = match;
+          }
+        }
+        
+        if (bestMatch) {
+          // update counts
+          for (const p of bestMatch.players) {
+            counts[p] += 1;
+          }
+          selected.push({ id: selected.length + 1, t1: bestMatch.t1, t2: bestMatch.t2, out: players.filter(p => !bestMatch.players.includes(p)) });
+          // remove the selected match from pool to avoid immediate duplicate (optional)
+          const idx = availablePool.indexOf(bestMatch);
+          if (idx !== -1) availablePool.splice(idx, 1);
+        } else {
+          // fallback (should never happen)
+          break;
+        }
+      }
+      return selected;
+    }
+
+    function generateBalancedMatches(players, totalMatches) {
+      if (players.length < 4) return [];
+      const allPossible = getAllPossibleMatches(players);
+      return selectBalancedMatches(allPossible, totalMatches, players);
+    }
+
+    // ---------- GAME RULES (unchanged) ----------
     function getPhase(s1, s2, prevPhase) {
       const total = s1 + s2;
-
-      // Tiebreak chain
       if (prevPhase === "sudden") return { label: "WINNER!", phase: "done" };
       if (prevPhase === "deuce") {
         if (s1 !== s2) return { label: "WINNER!", phase: "done" };
@@ -83,17 +166,15 @@
           return { label: "DEUCE", phase: "deuce" };
         }
       }
-
-      // Normal game - wait for all 4 serves
       if (total < 4) return { label: "SERVE " + (total + 1) + " / 4", phase: "live" };
       if (total === 4) {
         if (s1 === 2 && s2 === 2) return { label: "EXTRA ROUND", phase: "extra" };
-        return { label: "WINNER!", phase: "done" }; // 4-0 or 3-1
+        return { label: "WINNER!", phase: "done" };
       }
-
       return { label: "LIVE", phase: "live" };
     }
 
+    // ---------- UI COMPONENTS ----------
     function SetupScreen({ onStart }) {
       const [players, setPlayers] = useState(["Ricky","Indra","Chris","Ferdy","Momoncitoro","AlyA","AlyB","Giselle"]);
       const [matchCount, setMatchCount] = useState(18);
@@ -114,7 +195,7 @@
       return (
         <div style={{minHeight:"100vh",background:"#0a0e1a",fontFamily:"'Oswald',sans-serif",color:"#f0f0f0",padding:"0 0 60px"}}>
           <div style={{background:"linear-gradient(135deg,#0f1923,#1a2535)",borderBottom:"3px solid #7CFC00",padding:"20px",textAlign:"center"}}>
-            <div style={{fontSize:11,color:"#7CFC00",letterSpacing:5,marginBottom:4}}>DOUBLES TENNIS</div>
+            <div style={{fontSize:11,color:"#7CFC00",letterSpacing:5,marginBottom:4}}>DOUBLES TENNIS – BALANCED MATCHES</div>
             <div style={{fontSize:32,fontWeight:700}}>MATCH SETUP</div>
           </div>
           <div style={{maxWidth:500,margin:"0 auto",padding:"24px 20px"}}>
@@ -144,12 +225,12 @@
                 <div style={{flex:1,background:"#111827",border:"1px solid #1f2937",borderRadius:8,padding:"10px",textAlign:"center",fontSize:24,fontWeight:700,fontFamily:"Roboto Mono,monospace",color:"#7CFC00"}}>{matchCount}</div>
                 <button onClick={() => setMatchCount(Math.min(50, matchCount+1))} style={{background:"#1f2937",border:"none",color:"#fff",borderRadius:8,width:40,height:40,fontSize:20,cursor:"pointer"}}>+</button>
               </div>
-              <div style={{fontSize:11,color:"#555",marginTop:6,letterSpacing:1}}>~{Math.round(matchCount * 9)} min at ~9 min/match (3 hr = 18 matches)</div>
+              <div style={{fontSize:11,color:"#555",marginTop:6,letterSpacing:1}}>~{Math.round(matchCount * 9)} min at ~9 min/match · Balanced appearances</div>
             </div>
 
             {error && <div style={{background:"#2a1010",border:"1px solid #ff6b6b",borderRadius:8,padding:"10px 14px",color:"#ff6b6b",fontSize:13,marginBottom:16}}>{error}</div>}
 
-            <button className="btn-hover" onClick={handleStart} style={{width:"100%",background:"#7CFC00",color:"#000",border:"none",borderRadius:10,padding:"16px",fontSize:20,fontWeight:700,fontFamily:"Oswald,sans-serif",letterSpacing:3,cursor:"pointer",transition:"all 0.15s"}}>🎾 GENERATE MATCHES</button>
+            <button className="btn-hover" onClick={handleStart} style={{width:"100%",background:"#7CFC00",color:"#000",border:"none",borderRadius:10,padding:"16px",fontSize:20,fontWeight:700,fontFamily:"Oswald,sans-serif",letterSpacing:3,cursor:"pointer",transition:"all 0.15s"}}>🎾 GENERATE BALANCED MATCHES</button>
           </div>
         </div>
       );
@@ -252,14 +333,12 @@
 
                       {isActive && (
                         <div style={{borderTop:"1px solid #1f2937",padding:"16px 14px"}}>
-                          {/* Phase badge */}
                           <div style={{textAlign:"center",marginBottom:14}}>
                             <span className={sc.done?"pop":"pulse"} style={{display:"inline-block",fontSize:11,letterSpacing:3,fontWeight:700,padding:"5px 18px",borderRadius:20,background:phaseColors[sc.done?"done":sc.phase]||"#1f2937",color:sc.phase==="done"?"#000":"#fff"}}>
                               {phaseEmojis[sc.done?"done":sc.phase]} {ph.label}
                             </span>
                           </div>
 
-                          {/* Serve progress dots */}
                           {!sc.done && sc.phase === "live" && (
                             <div style={{display:"flex",justifyContent:"center",gap:8,marginBottom:14}}>
                               {[1,2,3,4].map(n => (
@@ -268,7 +347,6 @@
                             </div>
                           )}
 
-                          {/* Score + buttons */}
                           <div style={{display:"grid",gridTemplateColumns:"1fr 32px 1fr",alignItems:"center",gap:10,marginBottom:14}}>
                             {[{team:m.t1,s:sc.s1,num:1},{team:m.t2,s:sc.s2,num:2}].map((side, idx) => (
                               idx === 0 ? (
@@ -347,7 +425,8 @@
     function App() {
       const [gameData, setGameData] = useState(null);
       function handleStart(players, matchCount) {
-        setGameData({ players, matches: generateMatches(players, matchCount) });
+        const matches = generateBalancedMatches(players, matchCount);
+        setGameData({ players, matches });
       }
       if (!gameData) return <SetupScreen onStart={handleStart} />;
       return <Scoresheet players={gameData.players} matches={gameData.matches} onReset={() => setGameData(null)} />;
