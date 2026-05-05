@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🎾 Tennis Match Tracker</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@300;400;600;700&family=Roboto+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0a0e1a; }
+    input { outline: none; }
+    input:focus { border-color: #7CFC00 !important; }
+    .btn-hover:hover { opacity: 0.85; transform: scale(1.02); }
+    .btn-hover:active { transform: scale(0.98); }
+    .remove-btn:hover { color: #ff6b6b !important; border-color: #ff6b6b !important; }
+    .card { transition: all 0.2s; }
+    .card:hover { transform: translateY(-1px); }
+    .sbtn { transition: all 0.15s; cursor: pointer; }
+    .sbtn:hover { opacity: 0.85; transform: scale(1.05); }
+    .sbtn:active { transform: scale(0.97); }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-thumb { background: #7CFC00; border-radius: 2px; }
+    @keyframes fadeUp { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+    @keyframes pop { from{opacity:0;transform:scale(0.8)} to{opacity:1;transform:scale(1)} }
+    .fade-up { animation: fadeUp 0.4s ease both; }
+    .pulse { animation: pulse 1.4s infinite; }
+    .pop { animation: pop 0.3s ease; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState } = React;
+
+    const PALETTE = [
+      "#FF6B6B","#4ECDC4","#FFE66D","#A8E6CF","#FF8B94",
+      "#B5EAD7","#C7CEEA","#FFDAC1","#F0B27A","#85C1E9",
+      "#C39BD3","#82E0AA","#F9E79F","#FAD7A0","#AED6F1","#A9DFBF"
+    ];
+
+    function shuffle(arr) {
+      const a = [...arr];
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    }
+
+    function generateMatches(players, totalMatches) {
+      if (players.length < 4) return [];
+      const matches = [];
+      let attempts = 0;
+      while (matches.length < totalMatches && attempts < totalMatches * 50) {
+        attempts++;
+        const s = shuffle(players);
+        const t1 = [s[0], s[1]];
+        const t2 = [s[2], s[3]];
+        matches.push({ id: matches.length + 1, t1, t2, out: players.filter(p => !t1.includes(p) && !t2.includes(p)) });
+      }
+      return matches;
+    }
+
+    // All 4 players serve once = 4 total points in a normal game.
+    // Possible normal outcomes: 4-0, 3-1 (winner), 2-2 (extra round).
+    // Extra round: one more serve. If still tied -> Deuce. Still tied -> Sudden Death (next point wins).
+    function getPhase(s1, s2, prevPhase) {
+      const total = s1 + s2;
+
+      // Tiebreak chain
+      if (prevPhase === "sudden") return { label: "WINNER!", phase: "done" };
+      if (prevPhase === "deuce") {
+        if (s1 !== s2) return { label: "WINNER!", phase: "done" };
+        return { label: "SUDDEN DEATH", phase: "sudden" };
+      }
+      if (prevPhase === "extra") {
+        if (total === 5) {
+          if (s1 !== s2) return { label: "WINNER!", phase: "done" };
+          return { label: "DEUCE", phase: "deuce" };
+        }
+      }
+
+      // Normal game - wait for all 4 serves
+      if (total < 4) return { label: "SERVE " + (total + 1) + " / 4", phase: "live" };
+      if (total === 4) {
+        if (s1 === 2 && s2 === 2) return { label: "EXTRA ROUND", phase: "extra" };
+        return { label: "WINNER!", phase: "done" }; // 4-0 or 3-1
+      }
+
+      return { label: "LIVE", phase: "live" };
+    }
+
+    function SetupScreen({ onStart }) {
+      const [players, setPlayers] = useState(["Ricky","Indra","Chris","Ferdy","Momoncitoro","AlyA","AlyB","Giselle"]);
+      const [matchCount, setMatchCount] = useState(18);
+      const [error, setError] = useState("");
+
+      function updateName(i, val) { const p = [...players]; p[i] = val; setPlayers(p); }
+      function addPlayer() { if (players.length >= 16) return; setPlayers([...players, "Player " + (players.length + 1)]); }
+      function removePlayer(i) { if (players.length <= 4) return; setPlayers(players.filter((_, idx) => idx !== i)); }
+      function handleStart() {
+        const names = players.map(p => p.trim()).filter(Boolean);
+        if (names.length < 4) { setError("Need at least 4 players!"); return; }
+        const dupes = names.filter((n, i) => names.indexOf(n) !== i);
+        if (dupes.length) { setError("Duplicate names: " + [...new Set(dupes)].join(", ")); return; }
+        setError("");
+        onStart(names, matchCount);
+      }
+
+      return (
+        <div style={{minHeight:"100vh",background:"#0a0e1a",fontFamily:"'Oswald',sans-serif",color:"#f0f0f0",padding:"0 0 60px"}}>
+          <div style={{background:"linear-gradient(135deg,#0f1923,#1a2535)",borderBottom:"3px solid #7CFC00",padding:"20px",textAlign:"center"}}>
+            <div style={{fontSize:11,color:"#7CFC00",letterSpacing:5,marginBottom:4}}>DOUBLES TENNIS</div>
+            <div style={{fontSize:32,fontWeight:700}}>MATCH SETUP</div>
+          </div>
+          <div style={{maxWidth:500,margin:"0 auto",padding:"24px 20px"}}>
+            <div className="fade-up" style={{marginBottom:28}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                <div>
+                  <div style={{fontSize:11,color:"#7CFC00",letterSpacing:3}}>PLAYERS</div>
+                  <div style={{fontSize:13,color:"#555"}}>{players.length} players · minimum 4</div>
+                </div>
+                <button className="btn-hover" onClick={addPlayer} disabled={players.length >= 16} style={{background:"#7CFC00",color:"#000",border:"none",borderRadius:8,padding:"8px 16px",fontSize:13,fontWeight:700,fontFamily:"Oswald,sans-serif",letterSpacing:1,cursor:"pointer",transition:"all 0.15s",opacity:players.length>=16?0.4:1}}>+ ADD</button>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {players.map((p, i) => (
+                  <div key={i} style={{display:"flex",alignItems:"center",gap:10}}>
+                    <div style={{width:28,height:28,borderRadius:"50%",background:PALETTE[i%PALETTE.length],display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:"#000",flexShrink:0}}>{i+1}</div>
+                    <input value={p} onChange={e => updateName(i, e.target.value)} style={{flex:1,background:"#111827",border:"1px solid #1f2937",color:"#fff",borderRadius:8,padding:"10px 14px",fontSize:15,fontFamily:"Oswald,sans-serif",letterSpacing:1,transition:"border-color 0.2s"}} />
+                    <button className="remove-btn" onClick={() => removePlayer(i)} disabled={players.length <= 4} style={{background:"none",border:"1px solid #333",color:"#555",borderRadius:6,width:32,height:32,cursor:"pointer",fontSize:16,transition:"all 0.15s",flexShrink:0,opacity:players.length<=4?0.3:1}}>✕</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="fade-up" style={{marginBottom:28,animationDelay:"0.1s"}}>
+              <div style={{fontSize:11,color:"#7CFC00",letterSpacing:3,marginBottom:6}}>NUMBER OF MATCHES</div>
+              <div style={{display:"flex",alignItems:"center",gap:12}}>
+                <button onClick={() => setMatchCount(Math.max(4, matchCount-1))} style={{background:"#1f2937",border:"none",color:"#fff",borderRadius:8,width:40,height:40,fontSize:20,cursor:"pointer"}}>−</button>
+                <div style={{flex:1,background:"#111827",border:"1px solid #1f2937",borderRadius:8,padding:"10px",textAlign:"center",fontSize:24,fontWeight:700,fontFamily:"Roboto Mono,monospace",color:"#7CFC00"}}>{matchCount}</div>
+                <button onClick={() => setMatchCount(Math.min(50, matchCount+1))} style={{background:"#1f2937",border:"none",color:"#fff",borderRadius:8,width:40,height:40,fontSize:20,cursor:"pointer"}}>+</button>
+              </div>
+              <div style={{fontSize:11,color:"#555",marginTop:6,letterSpacing:1}}>~{Math.round(matchCount * 9)} min at ~9 min/match (3 hr = 18 matches)</div>
+            </div>
+
+            {error && <div style={{background:"#2a1010",border:"1px solid #ff6b6b",borderRadius:8,padding:"10px 14px",color:"#ff6b6b",fontSize:13,marginBottom:16}}>{error}</div>}
+
+            <button className="btn-hover" onClick={handleStart} style={{width:"100%",background:"#7CFC00",color:"#000",border:"none",borderRadius:10,padding:"16px",fontSize:20,fontWeight:700,fontFamily:"Oswald,sans-serif",letterSpacing:3,cursor:"pointer",transition:"all 0.15s"}}>🎾 GENERATE MATCHES</button>
+          </div>
+        </div>
+      );
+    }
+
+    function Scoresheet({ players, matches, onReset }) {
+      const [scores, setScores] = useState(() =>
+        Object.fromEntries(matches.map(m => [m.id, {s1:0,s2:0,done:false,winner:null,phase:"live"}]))
+      );
+      const [activeMatch, setActiveMatch] = useState(null);
+      const [view, setView] = useState("matches");
+      const colorMap = Object.fromEntries(players.map((p, i) => [p, PALETTE[i % PALETTE.length]]));
+
+      function addPoint(matchId, team) {
+        setScores(prev => {
+          const cur = prev[matchId];
+          if (cur.done) return prev;
+          const s1 = team === 1 ? cur.s1 + 1 : cur.s1;
+          const s2 = team === 2 ? cur.s2 + 1 : cur.s2;
+          const match = matches.find(m => m.id === matchId);
+          const ph = getPhase(s1, s2, cur.phase);
+          const done = ph.phase === "done";
+          const winner = done ? (s1 > s2 ? match.t1 : match.t2) : null;
+          return { ...prev, [matchId]: {s1, s2, done, winner, phase: done ? "done" : ph.phase} };
+        });
+      }
+
+      function resetMatch(matchId) {
+        setScores(prev => ({ ...prev, [matchId]: {s1:0,s2:0,done:false,winner:null,phase:"live"} }));
+      }
+
+      const completedCount = Object.values(scores).filter(s => s.done).length;
+      const leaderboard = players.map(p => ({
+        name: p,
+        wins: matches.filter(m => scores[m.id].winner?.includes(p)).length,
+        played: matches.filter(m => scores[m.id].done && (m.t1.includes(p) || m.t2.includes(p))).length
+      })).sort((a, b) => b.wins - a.wins || b.played - a.played);
+
+      const phaseColors = { done:"#7CFC00", extra:"#ff6b6b", deuce:"#ff8c00", sudden:"#cc0000", live:"#1f2937" };
+      const phaseEmojis = { done:"🏆", extra:"⚡", deuce:"🔥", sudden:"💀", live:"●" };
+
+      return (
+        <div style={{minHeight:"100vh",background:"#0a0e1a",fontFamily:"'Oswald',sans-serif",color:"#f0f0f0"}}>
+          <div style={{background:"linear-gradient(135deg,#0f1923,#1a2535)",borderBottom:"3px solid #7CFC00",padding:"14px 20px"}}>
+            <div style={{maxWidth:600,margin:"0 auto",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div>
+                <div style={{fontSize:10,color:"#7CFC00",letterSpacing:4}}>DOUBLES TENNIS</div>
+                <div style={{fontSize:24,fontWeight:700}}>LIVE SCORESHEET</div>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:16}}>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:10,color:"#555",letterSpacing:2}}>DONE</div>
+                  <div style={{fontSize:26,fontWeight:700,color:"#7CFC00",fontFamily:"Roboto Mono,monospace"}}>
+                    {completedCount}<span style={{color:"#333",fontSize:14}}>/{matches.length}</span>
+                  </div>
+                </div>
+                <button onClick={onReset} style={{background:"none",border:"1px solid #333",color:"#555",borderRadius:8,padding:"6px 12px",fontSize:10,fontFamily:"Oswald,sans-serif",letterSpacing:2,cursor:"pointer"}}>⚙ SETUP</button>
+              </div>
+            </div>
+            <div style={{maxWidth:600,margin:"8px auto 0"}}>
+              <div style={{background:"#1f2d3d",borderRadius:4,height:5}}>
+                <div style={{height:"100%",width:`${(completedCount/matches.length)*100}%`,background:"linear-gradient(90deg,#7CFC00,#00FF7F)",borderRadius:4,transition:"width 0.5s"}} />
+              </div>
+            </div>
+          </div>
+
+          <div style={{maxWidth:600,margin:"0 auto",padding:"0 20px"}}>
+            <div style={{display:"flex",borderBottom:"1px solid #1f2937"}}>
+              {["matches","leaderboard"].map(v => (
+                <button key={v} onClick={() => setView(v)} style={{background:"none",border:"none",color:view===v?"#7CFC00":"#555",fontSize:12,fontFamily:"Oswald,sans-serif",letterSpacing:3,fontWeight:600,padding:"12px 18px",cursor:"pointer",textTransform:"uppercase",borderBottom:view===v?"2px solid #7CFC00":"2px solid transparent",transition:"all 0.2s"}}>
+                  {v === "matches" ? "🎾 Matches" : "🏆 Leaderboard"}
+                </button>
+              ))}
+            </div>
+
+            {view === "matches" && (
+              <div style={{paddingTop:14,paddingBottom:50}}>
+                {matches.map(m => {
+                  const sc = scores[m.id];
+                  const isActive = activeMatch === m.id;
+                  const ph = getPhase(sc.s1, sc.s2, sc.phase);
+                  const total = sc.s1 + sc.s2;
+                  return (
+                    <div key={m.id} className="card" style={{background:isActive?"#0d1420":"#111827",border:isActive?"1px solid #7CFC00":sc.done?"1px solid #1a3a1a":"1px solid #1f2937",borderRadius:10,marginBottom:8,overflow:"hidden",boxShadow:isActive?"0 0 18px rgba(124,252,0,0.12)":"none"}}>
+                      <div onClick={() => setActiveMatch(isActive ? null : m.id)} style={{display:"flex",alignItems:"center",padding:"12px 14px",cursor:"pointer",gap:10}}>
+                        <div style={{width:26,height:26,borderRadius:"50%",flexShrink:0,background:sc.done?"#1a3a1a":isActive?"#7CFC00":"#1f2937",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:sc.done?"#7CFC00":isActive?"#000":"#555",fontFamily:"Roboto Mono,monospace"}}>{m.id}</div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:13,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                            <span style={{color:colorMap[m.t1[0]]}}>{m.t1[0]}</span> & <span style={{color:colorMap[m.t1[1]]}}>{m.t1[1]}</span>
+                            <span style={{color:"#7CFC00",margin:"0 6px",fontSize:10}}>VS</span>
+                            <span style={{color:colorMap[m.t2[0]]}}>{m.t2[0]}</span> & <span style={{color:colorMap[m.t2[1]]}}>{m.t2[1]}</span>
+                          </div>
+                          {sc.done && sc.winner && <div className="pop" style={{fontSize:10,color:"#7CFC00",marginTop:2}}>🏆 {sc.winner.join(" & ")} won {sc.s1}-{sc.s2}</div>}
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+                          {(sc.s1 > 0 || sc.s2 > 0) && <span style={{fontFamily:"Roboto Mono",fontSize:16,fontWeight:700}}>{sc.s1}<span style={{color:"#333"}}>-</span>{sc.s2}</span>}
+                          <span style={{color:sc.done?"#7CFC00":"#555",fontSize:sc.done?10:14}}>{sc.done?"✓":isActive?"▲":"▼"}</span>
+                        </div>
+                      </div>
+
+                      {isActive && (
+                        <div style={{borderTop:"1px solid #1f2937",padding:"16px 14px"}}>
+                          {/* Phase badge */}
+                          <div style={{textAlign:"center",marginBottom:14}}>
+                            <span className={sc.done?"pop":"pulse"} style={{display:"inline-block",fontSize:11,letterSpacing:3,fontWeight:700,padding:"5px 18px",borderRadius:20,background:phaseColors[sc.done?"done":sc.phase]||"#1f2937",color:sc.phase==="done"?"#000":"#fff"}}>
+                              {phaseEmojis[sc.done?"done":sc.phase]} {ph.label}
+                            </span>
+                          </div>
+
+                          {/* Serve progress dots */}
+                          {!sc.done && sc.phase === "live" && (
+                            <div style={{display:"flex",justifyContent:"center",gap:8,marginBottom:14}}>
+                              {[1,2,3,4].map(n => (
+                                <div key={n} style={{width:10,height:10,borderRadius:"50%",background:n<=total?"#7CFC00":"#1f2937",border:"1px solid",borderColor:n<=total?"#7CFC00":"#333",transition:"all 0.3s"}} />
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Score + buttons */}
+                          <div style={{display:"grid",gridTemplateColumns:"1fr 32px 1fr",alignItems:"center",gap:10,marginBottom:14}}>
+                            {[{team:m.t1,s:sc.s1,num:1},{team:m.t2,s:sc.s2,num:2}].map((side, idx) => (
+                              idx === 0 ? (
+                                <div key={idx} style={{textAlign:"center"}}>
+                                  <div style={{marginBottom:6}}>{side.team.map(p => <div key={p} style={{fontSize:12,fontWeight:600,color:colorMap[p]}}>{p}</div>)}</div>
+                                  <div style={{fontSize:52,fontWeight:700,fontFamily:"Roboto Mono",lineHeight:1,color:sc.winner?.includes(side.team[0])?"#7CFC00":"#fff"}}>{side.s}</div>
+                                  {!sc.done && <button className="sbtn" onClick={() => addPoint(m.id, side.num)} style={{marginTop:10,background:"#7CFC00",color:"#000",border:"none",borderRadius:8,padding:"8px 20px",fontSize:16,fontWeight:700,fontFamily:"Oswald",letterSpacing:1}}>+ PT</button>}
+                                </div>
+                              ) : (
+                                <React.Fragment key={idx}>
+                                  <div style={{textAlign:"center",color:"#333",fontSize:16,fontWeight:700}}>VS</div>
+                                  <div style={{textAlign:"center"}}>
+                                    <div style={{marginBottom:6}}>{side.team.map(p => <div key={p} style={{fontSize:12,fontWeight:600,color:colorMap[p]}}>{p}</div>)}</div>
+                                    <div style={{fontSize:52,fontWeight:700,fontFamily:"Roboto Mono",lineHeight:1,color:sc.winner?.includes(side.team[0])?"#7CFC00":"#fff"}}>{side.s}</div>
+                                    {!sc.done && <button className="sbtn" onClick={() => addPoint(m.id, side.num)} style={{marginTop:10,background:"#7CFC00",color:"#000",border:"none",borderRadius:8,padding:"8px 20px",fontSize:16,fontWeight:700,fontFamily:"Oswald",letterSpacing:1}}>+ PT</button>}
+                                  </div>
+                                </React.Fragment>
+                              )
+                            ))}
+                          </div>
+
+                          <div style={{background:"#0a0e1a",borderRadius:8,padding:"8px 12px",fontSize:10,color:"#444",letterSpacing:1,marginBottom:10}}>
+                            <span style={{color:"#7CFC00"}}>RULES: </span>All 4 players serve · 4-0 or 3-1 wins · 2-2 → Extra Round → Deuce → Sudden Death
+                          </div>
+                          <div style={{textAlign:"center"}}>
+                            <button className="sbtn" onClick={() => resetMatch(m.id)} style={{background:"none",border:"1px solid #2a2a2a",color:"#444",borderRadius:6,padding:"5px 14px",fontSize:10,fontFamily:"Oswald",letterSpacing:2,cursor:"pointer"}}>RESET</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {view === "leaderboard" && (
+              <div style={{paddingTop:18,paddingBottom:50}}>
+                {leaderboard.map((p, i) => {
+                  const maxW = leaderboard[0].wins || 1;
+                  return (
+                    <div key={p.name} style={{background:i===0&&p.wins>0?"linear-gradient(135deg,#0d2210,#111827)":"#111827",border:i===0&&p.wins>0?"1px solid #2d5a2d":"1px solid #1f2937",borderRadius:10,padding:"12px 16px",marginBottom:8,display:"flex",alignItems:"center",gap:12}}>
+                      <div style={{width:30,height:30,borderRadius:"50%",background:i===0&&p.wins>0?"#7CFC00":"#1f2937",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:i===0&&p.wins>0?"#000":"#555",flexShrink:0}}>{i+1}</div>
+                      <div style={{flex:1}}>
+                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                          <span style={{fontSize:15,fontWeight:600,color:colorMap[p.name]}}>{p.name}</span>
+                          <span style={{fontFamily:"Roboto Mono",fontSize:13}}>
+                            <span style={{color:"#7CFC00",fontWeight:700}}>{p.wins}W</span>
+                            <span style={{color:"#444"}}> / {p.played} played</span>
+                          </span>
+                        </div>
+                        <div style={{background:"#0a0e1a",borderRadius:4,height:5}}>
+                          <div style={{height:"100%",width:`${(p.wins/maxW)*100}%`,background:colorMap[p.name],borderRadius:4,transition:"width 0.5s"}} />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+                <div style={{marginTop:20,background:"#111827",border:"1px solid #1f2937",borderRadius:10,padding:"14px 16px"}}>
+                  <div style={{fontSize:10,color:"#555",letterSpacing:3,marginBottom:12}}>SESSION SUMMARY</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,textAlign:"center"}}>
+                    {[{val:completedCount,label:"DONE",color:"#7CFC00"},{val:matches.length-completedCount,label:"LEFT",color:"#ff6b6b"},{val:matches.length,label:"TOTAL",color:"#fff"}].map(s => (
+                      <div key={s.label}>
+                        <div style={{fontSize:26,fontWeight:700,color:s.color,fontFamily:"Roboto Mono"}}>{s.val}</div>
+                        <div style={{fontSize:10,color:"#555",letterSpacing:2}}>{s.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    function App() {
+      const [gameData, setGameData] = useState(null);
+      function handleStart(players, matchCount) {
+        setGameData({ players, matches: generateMatches(players, matchCount) });
+      }
+      if (!gameData) return <SetupScreen onStart={handleStart} />;
+      return <Scoresheet players={gameData.players} matches={gameData.matches} onReset={() => setGameData(null)} />;
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<App />);
+  </script>
+</body>
+</html>
