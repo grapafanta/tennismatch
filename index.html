@@ -41,29 +41,18 @@
   <script type="text/babel">
     const { useState, useEffect } = React;
 
-    // ==================== FIREBASE CONFIGURATION ====================
-    // 🔥 REPLACE WITH YOUR OWN FIREBASE PROJECT CONFIGURATION 🔥
-  const firebaseConfig = {
-
+    // 🔥 REPLACE WITH YOUR FIREBASE CONFIGURATION 🔥
+ const firebaseConfig = {
   apiKey: "AIzaSyDzLt4w6zhcChOp-fGFXi-2CiN-9s45d0g",
-
   authDomain: "tennis-match-d2552.firebaseapp.com",
-
   projectId: "tennis-match-d2552",
-
   storageBucket: "tennis-match-d2552.firebasestorage.app",
-
   messagingSenderId: "1083617593042",
-
   appId: "1:1083617593042:web:09c12b7454d67a2421cf0b"
-
 };
-
-
     // Initialize Firebase
     firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
-    // ================================================================
 
     // ---------- Helper functions ----------
     const PALETTE = [
@@ -72,7 +61,6 @@
       "#C39BD3","#82E0AA","#F9E79F","#FAD7A0","#AED6F1","#A9DFBF"
     ];
 
-    // ---------- Game rules (unchanged) ----------
     function getPhase(s1, s2, prevPhase) {
       const total = s1 + s2;
       if (prevPhase === "sudden") return { label: "WINNER!", phase: "done" };
@@ -94,7 +82,7 @@
       return { label: "LIVE", phase: "live" };
     }
 
-    // ---------- SKILL-BASED MATCH GENERATOR (same as previous) ----------
+    // ---------- SKILL-BASED MATCH GENERATOR ----------
     function getAllValidMatches(players, playerSkills) {
       const beginners = players.filter(p => playerSkills[p] === "beginner");
       const intermediates = players.filter(p => playerSkills[p] === "intermediate");
@@ -239,24 +227,30 @@
       );
     }
 
-    // ---------- SCORESHEET WITH FIREBASE SYNC ----------
+    // ---------- SCORESHEET (with hooks always called) ----------
     function Scoresheet({ players, matches, playerSkills, onReset }) {
-      // Get session ID from URL or create new one
-      const urlParams = new URLSearchParams(window.location.search);
-      let sessionID = urlParams.get('sessionID');
-      if (!sessionID) {
-        sessionID = Math.random().toString(36).substring(2, 15);
-        const newUrl = `${window.location.pathname}?sessionID=${sessionID}`;
-        window.history.replaceState({}, '', newUrl);
-        window.location.reload();
-        return <div style={{color:"white",textAlign:"center",marginTop:50}}>Creating shareable session... 🔄</div>;
-      }
-
+      const [sessionID, setSessionID] = useState(null);
       const [scores, setScores] = useState({});
       const [loading, setLoading] = useState(true);
+      const [activeMatch, setActiveMatch] = useState(null);
+      const [view, setView] = useState("matches");
       const colorMap = Object.fromEntries(players.map((p, i) => [p, PALETTE[i % PALETTE.length]]));
 
-      // Subscribe to Firestore real-time updates
+      // Generate or retrieve session ID (no early return)
+      useEffect(() => {
+        const urlParams = new URLSearchParams(window.location.search);
+        let id = urlParams.get('sessionID');
+        if (!id) {
+          id = Math.random().toString(36).substring(2, 15);
+          const newUrl = `${window.location.pathname}?sessionID=${id}`;
+          window.history.replaceState({}, '', newUrl);
+          window.location.reload();
+          return;
+        }
+        setSessionID(id);
+      }, []);
+
+      // Firestore subscription
       useEffect(() => {
         if (!sessionID) return;
         const docRef = db.collection("tennis_matches").doc(sessionID);
@@ -264,20 +258,18 @@
           if (doc.exists) {
             setScores(doc.data().scores || {});
           } else {
-            // Initialize new session with default scores
             const initialScores = Object.fromEntries(matches.map(m => [m.id, {s1:0,s2:0,done:false,winner:null,phase:"live"}]));
-            docRef.set({ scores: initialScores, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+            docRef.set({ scores: initialScores });
             setScores(initialScores);
           }
           setLoading(false);
-        }, (error) => {
-          console.error("Firestore error:", error);
+        }, (err) => {
+          console.error("Firestore error:", err);
           setLoading(false);
         });
         return () => unsubscribe();
       }, [sessionID, matches]);
 
-      // Add point and update Firestore (atomic transaction)
       const addPoint = async (matchId, team) => {
         if (!sessionID) return;
         const docRef = db.collection("tennis_matches").doc(sessionID);
@@ -300,9 +292,7 @@
             };
             transaction.update(docRef, { scores: newScores });
           });
-        } catch (err) {
-          console.error("Transaction failed", err);
-        }
+        } catch (err) { console.error(err); }
       };
 
       const resetMatch = async (matchId) => {
@@ -319,12 +309,12 @@
             };
             transaction.update(docRef, { scores: newScores });
           });
-        } catch (err) {
-          console.error("Reset failed", err);
-        }
+        } catch (err) { console.error(err); }
       };
 
-      if (loading) return <div style={{color:"white",textAlign:"center",marginTop:50}}>Loading match data... ⏳</div>;
+      if (loading || !sessionID) {
+        return <div style={{color:"white",textAlign:"center",marginTop:50}}>Loading match data... ⏳</div>;
+      }
 
       const completedCount = Object.values(scores).filter(s => s?.done).length;
       const leaderboard = players.map(p => {
@@ -347,11 +337,8 @@
       }).sort((a,b) => b.points - a.points || b.wins - a.wins);
       const maxPoints = leaderboard.length ? leaderboard[0].points : 1;
 
-      const [activeMatch, setActiveMatch] = useState(null);
-      const [view, setView] = useState("matches");
       const phaseColors = { done:"#7CFC00", extra:"#ff6b6b", deuce:"#ff8c00", sudden:"#cc0000", live:"#1f2937" };
       const phaseEmojis = { done:"🏆", extra:"⚡", deuce:"🔥", sudden:"💀", live:"●" };
-
       const shareUrl = window.location.href;
 
       return (
@@ -444,7 +431,7 @@
                             ))}
                           </div>
                           <div style={{background:"#0a0e1a",borderRadius:8,padding:"8px 12px",fontSize:10,color:"#444",marginBottom:10}}>
-                            <span style={{color:"#7CFC00"}}>RULES: </span>4 serves · 4-0/3-1 win · 2-2 → Extra → Deuce → Sudden Death
+                            <span style={{color:"#7CFC00"}}>RULES: </span>4 serves · 4-0/3-1 wins · 2-2 → Extra → Deuce → Sudden Death
                           </div>
                           <div style={{textAlign:"center"}}>
                             <button className="sbtn" onClick={() => resetMatch(m.id)} style={{background:"none",border:"1px solid #2a2a2a",color:"#444",borderRadius:6,padding:"5px 14px",fontSize:10,letterSpacing:2,cursor:"pointer"}}>RESET MATCH</button>
