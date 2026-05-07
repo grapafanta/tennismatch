@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>🎾 Tennis Match Tracker – Points Leaderboard</title>
+  <title>🎾 Tennis Match Tracker – Skill Balanced</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -11,8 +11,8 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: #0a0e1a; }
-    input { outline: none; }
-    input:focus { border-color: #7CFC00 !important; }
+    input, select { outline: none; }
+    input:focus, select:focus { border-color: #7CFC00 !important; }
     .btn-hover:hover { opacity: 0.85; transform: scale(1.02); }
     .btn-hover:active { transform: scale(0.98); }
     .remove-btn:hover { color: #ff6b6b !important; border-color: #ff6b6b !important; }
@@ -29,6 +29,7 @@
     .fade-up { animation: fadeUp 0.4s ease both; }
     .pulse { animation: pulse 1.4s infinite; }
     .pop { animation: pop 0.3s ease; }
+    .skill-badge { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-left: 6px; }
   </style>
 </head>
 <body>
@@ -42,46 +43,45 @@
       "#C39BD3","#82E0AA","#F9E79F","#FAD7A0","#AED6F1","#A9DFBF"
     ];
 
-    // ---------- BALANCED MATCH GENERATOR ----------
-    function getAllPossibleMatches(players) {
+    // ---------- SKILL-BASED MATCH GENERATOR ----------
+    // Each team must be [Beginner, Intermediate] pair.
+    function isValidTeam(team, playerSkills) {
+      if (team.length !== 2) return false;
+      const hasBeginner = team.some(p => playerSkills[p] === "beginner");
+      const hasIntermediate = team.some(p => playerSkills[p] === "intermediate");
+      return hasBeginner && hasIntermediate;
+    }
+
+    function getAllValidMatches(players, playerSkills) {
+      // Step 1: generate all possible beginner+intermediate pairs (teams)
+      const beginners = players.filter(p => playerSkills[p] === "beginner");
+      const intermediates = players.filter(p => playerSkills[p] === "intermediate");
+      const allTeams = [];
+      for (const b of beginners) {
+        for (const im of intermediates) {
+          allTeams.push([b, im].sort());
+        }
+      }
+      // Step 2: generate all matches between two distinct teams (4 unique players)
       const matches = [];
-      const n = players.length;
-      for (let i = 0; i < n; i++) {
-        for (let j = i+1; j < n; j++) {
-          for (let k = j+1; k < n; k++) {
-            for (let l = k+1; l < n; l++) {
-              const four = [players[i], players[j], players[k], players[l]];
-              const pairings = [
-                [[four[0], four[1]], [four[2], four[3]]],
-                [[four[0], four[2]], [four[1], four[3]]],
-                [[four[0], four[3]], [four[1], four[2]]]
-              ];
-              for (let [t1, t2] of pairings) {
-                t1 = [...t1].sort();
-                t2 = [...t2].sort();
-                const teamKey = [t1, t2].sort((a,b) => a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]));
-                matches.push({
-                  t1: teamKey[0],
-                  t2: teamKey[1],
-                  players: four.slice()
-                });
-              }
-            }
+      for (let i = 0; i < allTeams.length; i++) {
+        for (let j = i+1; j < allTeams.length; j++) {
+          const t1 = allTeams[i];
+          const t2 = allTeams[j];
+          const allPlayers = [...t1, ...t2];
+          if (new Set(allPlayers).size === 4) { // no overlapping players
+            matches.push({
+              t1: [...t1],
+              t2: [...t2],
+              players: allPlayers
+            });
           }
         }
       }
-      const unique = [];
-      const keySet = new Set();
-      for (const m of matches) {
-        const key = `${m.t1.join(',')}|${m.t2.join(',')}`;
-        if (!keySet.has(key)) {
-          keySet.add(key);
-          unique.push(m);
-        }
-      }
-      return unique;
+      return matches;
     }
 
+    // Balanced selection: pick matches while keeping player appearance counts even
     function selectBalancedMatches(allMatches, totalMatches, players) {
       if (totalMatches === 0) return [];
       if (allMatches.length === 0) return [];
@@ -100,7 +100,9 @@
           if (sumSq < bestScore) {
             bestScore = sumSq;
             bestMatch = match;
-          } else if (sumSq === bestScore && bestMatch && Math.random() < 0.5) bestMatch = match;
+          } else if (sumSq === bestScore && bestMatch && Math.random() < 0.5) {
+            bestMatch = match;
+          }
         }
         if (bestMatch) {
           for (const p of bestMatch.players) counts[p] += 1;
@@ -112,13 +114,13 @@
       return selected;
     }
 
-    function generateBalancedMatches(players, totalMatches) {
-      if (players.length < 4) return [];
-      const allPossible = getAllPossibleMatches(players);
-      return selectBalancedMatches(allPossible, totalMatches, players);
+    function generateSkillMatches(players, playerSkills, totalMatches) {
+      const allValid = getAllValidMatches(players, playerSkills);
+      if (allValid.length === 0) return [];
+      return selectBalancedMatches(allValid, totalMatches, players);
     }
 
-    // ---------- GAME RULES ----------
+    // ---------- GAME RULES (unchanged) ----------
     function getPhase(s1, s2, prevPhase) {
       const total = s1 + s2;
       if (prevPhase === "sudden") return { label: "WINNER!", phase: "done" };
@@ -140,45 +142,86 @@
       return { label: "LIVE", phase: "live" };
     }
 
-    // ---------- UI COMPONENTS ----------
+    // ---------- SETUP SCREEN (with skill toggles) ----------
     function SetupScreen({ onStart }) {
-      const [players, setPlayers] = useState(["Ricky","Indra","Chris","Ferdy","Momoncitoro","AlyA","AlyB","Giselle"]);
-      const [matchCount, setMatchCount] = useState(18);
+      const defaultPlayers = [
+        { name: "Ricky", skill: "beginner" },
+        { name: "feli", skill: "beginner" },
+        { name: "hansen", skill: "intermediate" },
+        { name: "indra (jam 4)", skill: "intermediate" },
+        { name: "cecil", skill: "beginner" },
+        { name: "chris", skill: "intermediate" },
+        { name: "Pitnal", skill: "intermediate" },
+        { name: "edwin", skill: "intermediate" },
+        { name: "mira", skill: "beginner" },
+        { name: "fely", skill: "beginner" }
+      ];
+      const [players, setPlayers] = useState(defaultPlayers);
+      const [matchCount, setMatchCount] = useState(10);
       const [error, setError] = useState("");
 
-      function updateName(i, val) { const p = [...players]; p[i] = val; setPlayers(p); }
-      function addPlayer() { if (players.length >= 16) return; setPlayers([...players, "Player " + (players.length + 1)]); }
-      function removePlayer(i) { if (players.length <= 4) return; setPlayers(players.filter((_, idx) => idx !== i)); }
+      function updatePlayer(i, field, value) {
+        const updated = [...players];
+        if (field === "name") updated[i].name = value;
+        else if (field === "skill") updated[i].skill = value;
+        setPlayers(updated);
+      }
+      function addPlayer() {
+        if (players.length >= 16) return;
+        setPlayers([...players, { name: "Player " + (players.length+1), skill: "beginner" }]);
+      }
+      function removePlayer(i) {
+        if (players.length <= 4) return;
+        setPlayers(players.filter((_, idx) => idx !== i));
+      }
       function handleStart() {
-        const names = players.map(p => p.trim()).filter(Boolean);
+        const names = players.map(p => p.name.trim()).filter(Boolean);
         if (names.length < 4) { setError("Need at least 4 players!"); return; }
         const dupes = names.filter((n, i) => names.indexOf(n) !== i);
         if (dupes.length) { setError("Duplicate names: " + [...new Set(dupes)].join(", ")); return; }
+        const beginners = players.filter(p => p.skill === "beginner").length;
+        const intermediates = players.filter(p => p.skill === "intermediate").length;
+        if (beginners === 0 || intermediates === 0) {
+          setError("Need at least one beginner AND one intermediate for balanced teams!");
+          return;
+        }
+        // Check if we can make valid teams: each team needs 1 beginner + 1 intermediate.
+        // For a match we need 2 beginners and 2 intermediates total.
+        if (beginners < 2 || intermediates < 2) {
+          setError("Need at least 2 beginners and 2 intermediates to form a single match!");
+          return;
+        }
         setError("");
-        onStart(names, matchCount);
+        const playerNames = players.map(p => p.name);
+        const playerSkills = Object.fromEntries(players.map(p => [p.name, p.skill]));
+        onStart(playerNames, playerSkills, matchCount);
       }
 
       return (
         <div style={{minHeight:"100vh",background:"#0a0e1a",fontFamily:"'Oswald',sans-serif",color:"#f0f0f0",padding:"0 0 60px"}}>
           <div style={{background:"linear-gradient(135deg,#0f1923,#1a2535)",borderBottom:"3px solid #7CFC00",padding:"20px",textAlign:"center"}}>
-            <div style={{fontSize:11,color:"#7CFC00",letterSpacing:5,marginBottom:4}}>DOUBLES TENNIS – POINTS LEADERBOARD</div>
+            <div style={{fontSize:11,color:"#7CFC00",letterSpacing:5,marginBottom:4}}>DOUBLES TENNIS – SKILL BALANCED</div>
             <div style={{fontSize:32,fontWeight:700}}>MATCH SETUP</div>
           </div>
-          <div style={{maxWidth:500,margin:"0 auto",padding:"24px 20px"}}>
+          <div style={{maxWidth:550,margin:"0 auto",padding:"24px 20px"}}>
             <div className="fade-up" style={{marginBottom:28}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
                 <div>
-                  <div style={{fontSize:11,color:"#7CFC00",letterSpacing:3}}>PLAYERS</div>
-                  <div style={{fontSize:13,color:"#555"}}>{players.length} players · minimum 4</div>
+                  <div style={{fontSize:11,color:"#7CFC00",letterSpacing:3}}>PLAYERS (BEGINNER / INTERMEDIATE)</div>
+                  <div style={{fontSize:13,color:"#555"}}>{players.length} players · min 4</div>
                 </div>
-                <button className="btn-hover" onClick={addPlayer} disabled={players.length >= 16} style={{background:"#7CFC00",color:"#000",border:"none",borderRadius:8,padding:"8px 16px",fontSize:13,fontWeight:700,fontFamily:"Oswald,sans-serif",letterSpacing:1,cursor:"pointer",transition:"all 0.15s",opacity:players.length>=16?0.4:1}}>+ ADD</button>
+                <button className="btn-hover" onClick={addPlayer} disabled={players.length >= 16} style={{background:"#7CFC00",color:"#000",border:"none",borderRadius:8,padding:"8px 16px",fontSize:13,fontWeight:700,fontFamily:"Oswald,sans-serif",letterSpacing:1,cursor:"pointer",opacity:players.length>=16?0.4:1}}>+ ADD</button>
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:8}}>
                 {players.map((p, i) => (
-                  <div key={i} style={{display:"flex",alignItems:"center",gap:10}}>
+                  <div key={i} style={{display:"flex",alignItems:"center",gap:8}}>
                     <div style={{width:28,height:28,borderRadius:"50%",background:PALETTE[i%PALETTE.length],display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:"#000",flexShrink:0}}>{i+1}</div>
-                    <input value={p} onChange={e => updateName(i, e.target.value)} style={{flex:1,background:"#111827",border:"1px solid #1f2937",color:"#fff",borderRadius:8,padding:"10px 14px",fontSize:15,fontFamily:"Oswald,sans-serif",letterSpacing:1,transition:"border-color 0.2s"}} />
-                    <button className="remove-btn" onClick={() => removePlayer(i)} disabled={players.length <= 4} style={{background:"none",border:"1px solid #333",color:"#555",borderRadius:6,width:32,height:32,cursor:"pointer",fontSize:16,transition:"all 0.15s",flexShrink:0,opacity:players.length<=4?0.3:1}}>✕</button>
+                    <input value={p.name} onChange={e => updatePlayer(i, "name", e.target.value)} style={{flex:2,background:"#111827",border:"1px solid #1f2937",color:"#fff",borderRadius:8,padding:"8px 12px",fontSize:14,fontFamily:"Oswald,sans-serif"}} />
+                    <select value={p.skill} onChange={e => updatePlayer(i, "skill", e.target.value)} style={{flex:1,background:"#111827",border:"1px solid #1f2937",color:"#fff",borderRadius:8,padding:"8px 12px",fontSize:13,fontFamily:"Oswald,sans-serif",cursor:"pointer"}}>
+                      <option value="beginner">🟢 Beginner</option>
+                      <option value="intermediate">🔵 Intermediate</option>
+                    </select>
+                    <button className="remove-btn" onClick={() => removePlayer(i)} disabled={players.length <= 4} style={{background:"none",border:"1px solid #333",color:"#555",borderRadius:6,width:32,height:32,cursor:"pointer",fontSize:16,opacity:players.length<=4?0.3:1}}>✕</button>
                   </div>
                 ))}
               </div>
@@ -191,18 +234,19 @@
                 <div style={{flex:1,background:"#111827",border:"1px solid #1f2937",borderRadius:8,padding:"10px",textAlign:"center",fontSize:24,fontWeight:700,fontFamily:"Roboto Mono,monospace",color:"#7CFC00"}}>{matchCount}</div>
                 <button onClick={() => setMatchCount(Math.min(50, matchCount+1))} style={{background:"#1f2937",border:"none",color:"#fff",borderRadius:8,width:40,height:40,fontSize:20,cursor:"pointer"}}>+</button>
               </div>
-              <div style={{fontSize:11,color:"#555",marginTop:6,letterSpacing:1}}>~{Math.round(matchCount * 9)} min at ~9 min/match · Balanced appearances</div>
+              <div style={{fontSize:11,color:"#555",marginTop:6,letterSpacing:1}}>Each match = 1 beginner + 1 intermediate per team. Balanced appearances.</div>
             </div>
 
             {error && <div style={{background:"#2a1010",border:"1px solid #ff6b6b",borderRadius:8,padding:"10px 14px",color:"#ff6b6b",fontSize:13,marginBottom:16}}>{error}</div>}
 
-            <button className="btn-hover" onClick={handleStart} style={{width:"100%",background:"#7CFC00",color:"#000",border:"none",borderRadius:10,padding:"16px",fontSize:20,fontWeight:700,fontFamily:"Oswald,sans-serif",letterSpacing:3,cursor:"pointer",transition:"all 0.15s"}}>🎾 GENERATE BALANCED MATCHES</button>
+            <button className="btn-hover" onClick={handleStart} style={{width:"100%",background:"#7CFC00",color:"#000",border:"none",borderRadius:10,padding:"16px",fontSize:20,fontWeight:700,fontFamily:"Oswald,sans-serif",letterSpacing:3,cursor:"pointer"}}>🎾 GENERATE SKILL-BALANCED MATCHES</button>
           </div>
         </div>
       );
     }
 
-    function Scoresheet({ players, matches, onReset }) {
+    // ---------- SCORESHEET (same as before, but with skill info not needed in display) ----------
+    function Scoresheet({ players, matches, playerSkills, onReset }) {
       const [scores, setScores] = useState(() =>
         Object.fromEntries(matches.map(m => [m.id, {s1:0,s2:0,done:false,winner:null,phase:"live"}]))
       );
@@ -230,7 +274,7 @@
 
       const completedCount = Object.values(scores).filter(s => s.done).length;
       
-      // ----- NEW POINTS-BASED LEADERBOARD -----
+      // Points-based leaderboard
       const leaderboard = players.map(p => {
         let totalPoints = 0;
         let wins = 0;
@@ -251,7 +295,7 @@
             }
           }
         });
-        return { name: p, points: totalPoints, wins, played };
+        return { name: p, points: totalPoints, wins, played, skill: playerSkills[p] };
       }).sort((a, b) => b.points - a.points || b.wins - a.wins);
       
       const maxPoints = leaderboard.length ? leaderboard[0].points : 1;
@@ -264,7 +308,7 @@
           <div style={{background:"linear-gradient(135deg,#0f1923,#1a2535)",borderBottom:"3px solid #7CFC00",padding:"14px 20px"}}>
             <div style={{maxWidth:600,margin:"0 auto",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div>
-                <div style={{fontSize:10,color:"#7CFC00",letterSpacing:4}}>DOUBLES TENNIS</div>
+                <div style={{fontSize:10,color:"#7CFC00",letterSpacing:4}}>SKILL BALANCED DOUBLES</div>
                 <div style={{fontSize:24,fontWeight:700}}>LIVE SCORESHEET</div>
               </div>
               <div style={{display:"flex",alignItems:"center",gap:16}}>
@@ -287,7 +331,7 @@
           <div style={{maxWidth:600,margin:"0 auto",padding:"0 20px"}}>
             <div style={{display:"flex",borderBottom:"1px solid #1f2937"}}>
               {["matches","leaderboard"].map(v => (
-                <button key={v} onClick={() => setView(v)} style={{background:"none",border:"none",color:view===v?"#7CFC00":"#555",fontSize:12,fontFamily:"Oswald,sans-serif",letterSpacing:3,fontWeight:600,padding:"12px 18px",cursor:"pointer",textTransform:"uppercase",borderBottom:view===v?"2px solid #7CFC00":"2px solid transparent",transition:"all 0.2s"}}>
+                <button key={v} onClick={() => setView(v)} style={{background:"none",border:"none",color:view===v?"#7CFC00":"#555",fontSize:12,fontFamily:"Oswald,sans-serif",letterSpacing:3,fontWeight:600,padding:"12px 18px",cursor:"pointer",textTransform:"uppercase",borderBottom:view===v?"2px solid #7CFC00":"2px solid transparent"}}>
                   {v === "matches" ? "🎾 Matches" : "🏆 Points Leaderboard"}
                 </button>
               ))}
@@ -376,10 +420,13 @@
                     <div style={{width:36,height:36,borderRadius:"50%",background:i===0 && p.points>0?"#7CFC00":"#1f2937",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:700,color:i===0 && p.points>0?"#000":"#555",flexShrink:0}}>{i+1}</div>
                     <div style={{flex:1}}>
                       <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
-                        <span style={{fontSize:16,fontWeight:600,color:colorMap[p.name]}}>{p.name}</span>
+                        <span style={{fontSize:16,fontWeight:600,color:colorMap[p.name]}}>
+                          {p.name}
+                          <span className="skill-badge" style={{background: p.skill === "beginner" ? "#4CAF50" : "#2196F3", width: 12, height: 12, display: "inline-block", marginLeft: 8}}></span>
+                        </span>
                         <span style={{fontFamily:"Roboto Mono",fontSize:13}}>
                           <span style={{color:"#7CFC00",fontWeight:700}}>{p.points} PTS</span>
-                          <span style={{color:"#444"}}> · {p.wins}W / {p.played} played</span>
+                          <span style={{color:"#444"}}> · {p.wins}W / {p.played}</span>
                         </span>
                       </div>
                       <div style={{background:"#0a0e1a",borderRadius:4,height:5}}>
@@ -406,14 +453,19 @@
       );
     }
 
+    // ---------- APP ----------
     function App() {
       const [gameData, setGameData] = useState(null);
-      function handleStart(players, matchCount) {
-        const matches = generateBalancedMatches(players, matchCount);
-        setGameData({ players, matches });
+      function handleStart(players, playerSkills, matchCount) {
+        const matches = generateSkillMatches(players, playerSkills, matchCount);
+        if (matches.length === 0) {
+          alert("Not enough valid matches possible with given skill distribution. Increase number of beginners or intermediates.");
+          return;
+        }
+        setGameData({ players, playerSkills, matches });
       }
       if (!gameData) return <SetupScreen onStart={handleStart} />;
-      return <Scoresheet players={gameData.players} matches={gameData.matches} onReset={() => setGameData(null)} />;
+      return <Scoresheet players={gameData.players} matches={gameData.matches} playerSkills={gameData.playerSkills} onReset={() => setGameData(null)} />;
     }
 
     const root = ReactDOM.createRoot(document.getElementById("root"));
