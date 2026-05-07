@@ -34,6 +34,7 @@
     .pulse { animation: pulse 1.4s infinite; }
     .pop { animation: pop 0.3s ease; }
     .skill-badge { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-left: 6px; }
+    .appearance-badge { display: inline-block; background: #1f2937; border-radius: 20px; padding: 0 8px; font-size: 11px; font-weight: 700; margin-left: 6px; color: #aaa; }
   </style>
 </head>
 <body>
@@ -42,7 +43,7 @@
     const { useState, useEffect } = React;
 
     // 🔥 REPLACE WITH YOUR FIREBASE CONFIGURATION 🔥
-const firebaseConfig = {
+  const firebaseConfig = {
   apiKey: "AIzaSyDzLt4w6zhcChOp-fGFXi-2CiN-9s45d0g",
   authDomain: "tennis-match-d2552.firebaseapp.com",
   projectId: "tennis-match-d2552",
@@ -141,9 +142,8 @@ const firebaseConfig = {
       return selectBalancedMatches(allValid, totalMatches, players);
     }
 
-    // ---------- SETUP SCREEN (generates session and redirects) ----------
+    // ---------- SETUP SCREEN ----------
     function SetupScreen() {
-      // DEFAULT: 4 players (2 beginners, 2 intermediates) and 8 matches
       const defaultPlayers = [
         { name: "Player 1", skill: "beginner" },
         { name: "Player 2", skill: "intermediate" },
@@ -185,7 +185,6 @@ const firebaseConfig = {
           return;
         }
 
-        // Create a new session in Firestore
         const sessionID = Math.random().toString(36).substring(2, 15);
         const initialScores = Object.fromEntries(matches.map(m => [m.id, {s1:0,s2:0,done:false,winner:null,phase:"live"}]));
         const sessionData = {
@@ -197,7 +196,6 @@ const firebaseConfig = {
         };
         try {
           await db.collection("tennis_sessions").doc(sessionID).set(sessionData);
-          // Redirect to the new session URL
           window.location.href = `${window.location.pathname}?sessionID=${sessionID}`;
         } catch (err) {
           console.error(err);
@@ -252,7 +250,7 @@ const firebaseConfig = {
       );
     }
 
-    // ---------- SCORESHEET (loads from Firestore using sessionID in URL) ----------
+    // ---------- SCORESHEET ----------
     function Scoresheet({ onReset }) {
       const [sessionID] = useState(() => new URLSearchParams(window.location.search).get('sessionID'));
       const [players, setPlayers] = useState(null);
@@ -350,6 +348,15 @@ const firebaseConfig = {
 
       const colorMap = Object.fromEntries(players.map((p, i) => [p, PALETTE[i % PALETTE.length]]));
       const completedCount = Object.values(scores).filter(s => s?.done).length;
+
+      // ----- Compute appearance count per player (how many matches they are scheduled to play) -----
+      const appearanceCount = {};
+      players.forEach(p => { appearanceCount[p] = 0; });
+      matches.forEach(m => {
+        m.t1.forEach(p => appearanceCount[p]++);
+        m.t2.forEach(p => appearanceCount[p]++);
+      });
+
       const leaderboard = players.map(p => {
         let totalPoints = 0, wins = 0, played = 0;
         matches.forEach(m => {
@@ -474,6 +481,18 @@ const firebaseConfig = {
                     </div>
                   );
                 })}
+                {/* --- NEW: Matches per player counter --- */}
+                <div style={{marginTop:20,background:"#0d1420",border:"1px solid #1f2937",borderRadius:10,padding:"12px 16px"}}>
+                  <div style={{fontSize:10,color:"#7CFC00",letterSpacing:3,marginBottom:10}}>📋 MATCHES PER PLAYER</div>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:"12px",justifyContent:"center"}}>
+                    {players.map(p => (
+                      <div key={p} style={{display:"flex",alignItems:"center",gap:6,background:"#111827",padding:"4px 12px",borderRadius:20}}>
+                        <span style={{fontSize:13,fontWeight:600,color:colorMap[p]}}>{p}</span>
+                        <span style={{background:"#1f2937",borderRadius:12,padding:"2px 8px",fontSize:11,fontWeight:700,color:"#7CFC00"}}>{appearanceCount[p]}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
 
