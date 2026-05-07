@@ -42,15 +42,14 @@
     const { useState, useEffect } = React;
 
     // 🔥 REPLACE WITH YOUR FIREBASE CONFIGURATION 🔥
-  const firebaseConfig = {
-  apiKey: "AIzaSyDzLt4w6zhcChOp-fGFXi-2CiN-9s45d0g",
-  authDomain: "tennis-match-d2552.firebaseapp.com",
-  projectId: "tennis-match-d2552",
-  storageBucket: "tennis-match-d2552.firebasestorage.app",
-  messagingSenderId: "1083617593042",
-  appId: "1:1083617593042:web:09c12b7454d67a2421cf0b"
-};
-    // Initialize Firebase
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_AUTH_DOMAIN",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_STORAGE_BUCKET",
+      messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+      appId: "YOUR_APP_ID"
+    };
     firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
 
@@ -142,8 +141,8 @@
       return selectBalancedMatches(allValid, totalMatches, players);
     }
 
-    // ---------- SETUP SCREEN ----------
-    function SetupScreen({ onStart }) {
+    // ---------- SETUP SCREEN (generates session and redirects) ----------
+    function SetupScreen() {
       const defaultPlayers = [
         { name: "Ricky", skill: "beginner" },
         { name: "feli", skill: "beginner" },
@@ -157,8 +156,9 @@
         { name: "fely", skill: "beginner" }
       ];
       const [players, setPlayers] = useState(defaultPlayers);
-      const [matchCount, setMatchCount] = useState(36);
+      const [matchCount, setMatchCount] = useState(20);
       const [error, setError] = useState("");
+      const [isCreating, setIsCreating] = useState(false);
 
       function updatePlayer(i, field, value) {
         const updated = [...players];
@@ -168,7 +168,8 @@
       }
       function addPlayer() { if (players.length >= 16) return; setPlayers([...players, { name: "Player " + (players.length+1), skill: "beginner" }]); }
       function removePlayer(i) { if (players.length <= 4) return; setPlayers(players.filter((_, idx) => idx !== i)); }
-      function handleStart() {
+
+      async function handleStart() {
         const names = players.map(p => p.name.trim()).filter(Boolean);
         if (names.length < 4) { setError("Need at least 4 players!"); return; }
         const dupes = names.filter((n, i) => names.indexOf(n) !== i);
@@ -178,9 +179,36 @@
         if (beginners === 0 || intermediates === 0) { setError("Need at least one beginner AND one intermediate!"); return; }
         if (beginners < 2 || intermediates < 2) { setError("Need at least 2 beginners and 2 intermediates for a match!"); return; }
         setError("");
+        setIsCreating(true);
+
         const playerNames = players.map(p => p.name);
         const playerSkills = Object.fromEntries(players.map(p => [p.name, p.skill]));
-        onStart(playerNames, playerSkills, matchCount);
+        const matches = generateSkillMatches(playerNames, playerSkills, matchCount);
+        if (matches.length === 0) {
+          setError("Not enough valid matches. Increase match count or adjust skills.");
+          setIsCreating(false);
+          return;
+        }
+
+        // Create a new session in Firestore
+        const sessionID = Math.random().toString(36).substring(2, 15);
+        const initialScores = Object.fromEntries(matches.map(m => [m.id, {s1:0,s2:0,done:false,winner:null,phase:"live"}]));
+        const sessionData = {
+          players: playerNames,
+          matches: matches,
+          playerSkills: playerSkills,
+          scores: initialScores,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        try {
+          await db.collection("tennis_sessions").doc(sessionID).set(sessionData);
+          // Redirect to the new session URL
+          window.location.href = `${window.location.pathname}?sessionID=${sessionID}`;
+        } catch (err) {
+          console.error(err);
+          setError("Failed to create session: " + err.message);
+          setIsCreating(false);
+        }
       }
 
       return (
@@ -221,50 +249,35 @@
 
             {error && <div style={{background:"#2a1010",border:"1px solid #ff6b6b",borderRadius:8,padding:"10px",color:"#ff6b6b",fontSize:13,marginBottom:16}}>{error}</div>}
 
-            <button className="btn-hover" onClick={handleStart} style={{width:"100%",background:"#7CFC00",color:"#000",border:"none",borderRadius:10,padding:"16px",fontSize:20,fontWeight:700,letterSpacing:3,cursor:"pointer"}}>🎾 GENERATE LIVE SESSION</button>
+            <button className="btn-hover" onClick={handleStart} disabled={isCreating} style={{width:"100%",background:"#7CFC00",color:"#000",border:"none",borderRadius:10,padding:"16px",fontSize:20,fontWeight:700,letterSpacing:3,cursor:"pointer",opacity:isCreating?0.6:1}}>
+              {isCreating ? "Creating session... ⏳" : "🎾 GENERATE LIVE SESSION"}
+            </button>
           </div>
         </div>
       );
     }
 
-    // ---------- SCORESHEET WITH FULL SESSION STORAGE ----------
-    function Scoresheet({ initialData, onReset }) {
-      const [sessionID, setSessionID] = useState(null);
+    // ---------- SCORESHEET (loads from Firestore using sessionID in URL) ----------
+    function Scoresheet({ onReset }) {
+      const [sessionID] = useState(() => new URLSearchParams(window.location.search).get('sessionID'));
       const [players, setPlayers] = useState(null);
       const [matches, setMatches] = useState(null);
       const [playerSkills, setPlayerSkills] = useState(null);
       const [scores, setScores] = useState({});
       const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
       const [activeMatch, setActiveMatch] = useState(null);
       const [view, setView] = useState("matches");
-      const [error, setError] = useState(null);
 
-      // Color map depends on players
-      const colorMap = players ? Object.fromEntries(players.map((p, i) => [p, PALETTE[i % PALETTE.length]])) : {};
-
-      // Step 1: Get session ID from URL or create new one (but don't reload if we already have initialData)
       useEffect(() => {
-        const urlParams = new URLSearchParams(window.location.search);
-        let id = urlParams.get('sessionID');
-        if (!id) {
-          // New session – generate ID and reload with it
-          id = Math.random().toString(36).substring(2, 15);
-          const newUrl = `${window.location.pathname}?sessionID=${id}`;
-          window.history.replaceState({}, '', newUrl);
-          window.location.reload();
+        if (!sessionID) {
+          setError("No session ID found. Please go back and generate a session.");
+          setLoading(false);
           return;
         }
-        setSessionID(id);
-      }, []);
-
-      // Step 2: Load or create session data from Firestore
-      useEffect(() => {
-        if (!sessionID) return;
         const docRef = db.collection("tennis_sessions").doc(sessionID);
-        
-        const unsubscribe = docRef.onSnapshot(async (doc) => {
+        const unsubscribe = docRef.onSnapshot((doc) => {
           if (doc.exists) {
-            // Existing session: restore players, matches, skills, scores
             const data = doc.data();
             setPlayers(data.players);
             setMatches(data.matches);
@@ -272,39 +285,17 @@
             setScores(data.scores || {});
             setLoading(false);
           } else {
-            // New session: create from initialData (passed from SetupScreen)
-            if (initialData) {
-              const { players: p, matches: m, playerSkills: ps } = initialData;
-              const initialScores = Object.fromEntries(m.map(match => [match.id, {s1:0,s2:0,done:false,winner:null,phase:"live"}]));
-              const sessionData = {
-                players: p,
-                matches: m,
-                playerSkills: ps,
-                scores: initialScores,
-                createdAt: firebase.firestore.FieldValue.serverTimestamp()
-              };
-              await docRef.set(sessionData);
-              setPlayers(p);
-              setMatches(m);
-              setPlayerSkills(ps);
-              setScores(initialScores);
-              setLoading(false);
-            } else {
-              // No initialData and no existing session – this shouldn't happen, but fallback
-              setError("No session data found. Please go back and generate a new session.");
-              setLoading(false);
-            }
+            setError("Session not found. It may have been deleted or the link is incorrect.");
+            setLoading(false);
           }
         }, (err) => {
-          console.error("Firestore error:", err);
+          console.error(err);
           setError("Failed to load session: " + err.message);
           setLoading(false);
         });
-        
         return () => unsubscribe();
-      }, [sessionID, initialData]);
+      }, [sessionID]);
 
-      // Add point and update Firestore
       const addPoint = async (matchId, team) => {
         if (!sessionID) return;
         const docRef = db.collection("tennis_sessions").doc(sessionID);
@@ -328,7 +319,7 @@
             transaction.update(docRef, { scores: newScores });
           });
         } catch (err) {
-          console.error("Add point error:", err);
+          console.error(err);
           alert("Failed to add point: " + err.message);
         }
       };
@@ -348,26 +339,21 @@
             transaction.update(docRef, { scores: newScores });
           });
         } catch (err) {
-          console.error("Reset error:", err);
+          console.error(err);
           alert("Failed to reset match: " + err.message);
         }
       };
 
-      if (loading) {
-        return <div style={{color:"white",textAlign:"center",marginTop:50}}>Loading session... ⏳</div>;
-      }
-      if (error) {
-        return (
-          <div style={{color:"white",textAlign:"center",marginTop:50}}>
-            <div style={{color:"#ff6b6b",marginBottom:20}}>⚠️ {error}</div>
-            <button onClick={onReset} style={{background:"#7CFC00",border:"none",borderRadius:8,padding:"10px 20px",cursor:"pointer"}}>Go Back to Setup</button>
-          </div>
-        );
-      }
-      if (!players || !matches) {
-        return <div style={{color:"white",textAlign:"center",marginTop:50}}>Invalid session data. Please go back and generate a new session.</div>;
-      }
+      if (loading) return <div style={{color:"white",textAlign:"center",marginTop:50}}>Loading session... ⏳</div>;
+      if (error) return (
+        <div style={{color:"white",textAlign:"center",marginTop:50}}>
+          <div style={{color:"#ff6b6b",marginBottom:20}}>⚠️ {error}</div>
+          <button onClick={onReset} style={{background:"#7CFC00",border:"none",borderRadius:8,padding:"10px 20px",cursor:"pointer"}}>Go Back to Setup</button>
+        </div>
+      );
+      if (!players || !matches) return <div style={{color:"white",textAlign:"center",marginTop:50}}>Invalid session data.</div>;
 
+      const colorMap = Object.fromEntries(players.map((p, i) => [p, PALETTE[i % PALETTE.length]]));
       const completedCount = Object.values(scores).filter(s => s?.done).length;
       const leaderboard = players.map(p => {
         let totalPoints = 0, wins = 0, played = 0;
@@ -530,29 +516,15 @@
 
     // ---------- APP ----------
     function App() {
-      const [gameData, setGameData] = useState(null);
-      function handleStart(players, playerSkills, matchCount) {
-        const matches = generateSkillMatches(players, playerSkills, matchCount);
-        if (matches.length === 0) { alert("Not enough valid matches. Increase beginners or intermediates."); return; }
-        setGameData({ players, matches, playerSkills });
-      }
-      // If there is a sessionID in URL, we go directly to Scoresheet without initialData
-      // The Scoresheet will load from Firestore. If no sessionID, we show SetupScreen.
       const urlParams = new URLSearchParams(window.location.search);
       const sessionID = urlParams.get('sessionID');
-      if (sessionID) {
-        // If we have a sessionID but no gameData, we still render Scoresheet with null initialData
-        // It will load from Firestore.
-        if (!gameData) {
-          return <Scoresheet initialData={null} onReset={() => setGameData(null)} />;
-        } else {
-          // This case happens after generating a new session – but we already have gameData
-          return <Scoresheet initialData={gameData} onReset={() => setGameData(null)} />;
-        }
+      const [showSetup, setShowSetup] = useState(!sessionID);
+
+      if (showSetup) {
+        return <SetupScreen />;
+      } else {
+        return <Scoresheet onReset={() => setShowSetup(true)} />;
       }
-      if (!gameData) return <SetupScreen onStart={handleStart} />;
-      // When starting a new session, we have gameData and no sessionID yet – the Scoresheet will create the ID
-      return <Scoresheet initialData={gameData} onReset={() => setGameData(null)} />;
     }
 
     const root = ReactDOM.createRoot(document.getElementById("root"));
