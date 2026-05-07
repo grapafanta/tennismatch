@@ -1,28 +1,23 @@
-// Perfectly balanced match generator using randomised hill‑climbing
-function generateFairMatches(players, playerSkills, totalMatches) {
-  const n = players.length;
-  const totalSlots = totalMatches * 4;
-  const base = Math.floor(totalSlots / n);
-  let remainder = totalSlots % n;
-  const targets = {};
-  for (const p of players) targets[p] = base;
-  const sortedPlayers = [...players].sort();
-  for (let i = 0; i < remainder; i++) targets[sortedPlayers[i]]++;
+// ------------------------------------------------------------------
+// Perfectly balanced match generator using recursive backtracking
+// ------------------------------------------------------------------
 
-  // Generate all possible matches (any 4 distinct players, all 3 splits)
-  const allMatches = [];
+function getAllMatches(players) {
+  const n = players.length;
+  const matches = [];
   for (let i = 0; i < n; i++) {
     for (let j = i+1; j < n; j++) {
       for (let k = j+1; k < n; k++) {
         for (let l = k+1; l < n; l++) {
           const four = [players[i], players[j], players[k], players[l]];
+          // All 3 ways to split four players into two teams of two
           const splits = [
             [[four[0], four[1]], [four[2], four[3]]],
             [[four[0], four[2]], [four[1], four[3]]],
             [[four[0], four[3]], [four[1], four[2]]]
           ];
-          for (let [t1, t2] of splits) {
-            allMatches.push({
+          for (const [t1, t2] of splits) {
+            matches.push({
               t1: t1.sort(),
               t2: t2.sort(),
               players: four.slice()
@@ -32,65 +27,99 @@ function generateFairMatches(players, playerSkills, totalMatches) {
       }
     }
   }
+  return matches;
+}
 
-  // Randomised search with backtracking
+function generateFairMatches(players, playerSkills, totalMatches) {
+  const allMatches = getAllMatches(players);
+  if (allMatches.length === 0) return [];
+
+  const n = players.length;
+  const totalSlots = totalMatches * 4;
+  const base = Math.floor(totalSlots / n);
+  let remainder = totalSlots % n;
+  const targets = {};
+  for (const p of players) targets[p] = base;
+  const sortedPlayers = [...players].sort();
+  for (let i = 0; i < remainder; i++) targets[sortedPlayers[i]]++;
+
+  // Sort matches by some heuristic (fewest remaining options first) – improves speed
+  // For now, we'll shuffle for randomness
+  const shuffled = [...allMatches];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+
   let bestSolution = null;
-  const maxAttempts = 1000;
 
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const selected = [];
-    const remainingTargets = { ...targets };
-    const availableMatches = [...allMatches];
-    // Shuffle matches for randomness
-    for (let i = availableMatches.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [availableMatches[i], availableMatches[j]] = [availableMatches[j], availableMatches[i]];
+  function backtrack(selected, counts, startIdx) {
+    if (selected.length === totalMatches) {
+      // Verify all counts exactly match targets
+      for (const p of players) {
+        if (counts[p] !== targets[p]) return false;
+      }
+      bestSolution = [...selected];
+      return true;
     }
 
-    for (const match of availableMatches) {
-      if (selected.length === totalMatches) break;
-      // Check if all players in this match still need appearances
-      let possible = true;
+    // Prune: if any player already exceeds target
+    for (const p of players) {
+      if (counts[p] > targets[p]) return false;
+    }
+
+    // Prune: remaining matches cannot fill the needed slots
+    const remaining = totalMatches - selected.length;
+    let totalNeeded = 0;
+    for (const p of players) {
+      totalNeeded += targets[p] - counts[p];
+    }
+    if (totalNeeded !== remaining * 4) return false;
+
+    // Try matches from startIdx onward
+    for (let i = startIdx; i < shuffled.length; i++) {
+      const match = shuffled[i];
+      let fits = true;
       for (const p of match.players) {
-        if (remainingTargets[p] === 0) {
-          possible = false;
+        if (counts[p] + 1 > targets[p]) {
+          fits = false;
           break;
         }
       }
-      if (possible) {
-        selected.push(match);
-        for (const p of match.players) remainingTargets[p]--;
-      }
-    }
+      if (!fits) continue;
 
-    if (selected.length === totalMatches) {
-      // Perfect – all targets met
-      bestSolution = selected;
-      break;
+      const newCounts = { ...counts };
+      for (const p of match.players) newCounts[p]++;
+      selected.push(match);
+      if (backtrack(selected, newCounts, i + 1)) return true;
+      selected.pop();
     }
-    // If not perfect, try another random shuffle
+    return false;
   }
 
-  if (!bestSolution) {
-    // Fallback: greedy with no target checks (should not happen)
-    console.warn("Could not find perfect schedule, using fallback");
-    const selected = [];
-    const usedMatches = new Set();
-    for (const match of allMatches) {
-      if (selected.length >= totalMatches) break;
-      if (!usedMatches.has(match)) {
-        selected.push(match);
-        usedMatches.add(match);
+  const initialCounts = {};
+  for (const p of players) initialCounts[p] = 0;
+  const found = backtrack([], initialCounts, 0);
+
+  if (!found || !bestSolution) {
+    // Fallback: This should never happen for valid inputs.
+    // But if it does, we generate a simple round‑robin schedule as a last resort.
+    console.warn("Backtracking failed, using fallback round‑robin");
+    const fallbackMatches = [];
+    for (let i = 0; i < players.length; i += 4) {
+      if (fallbackMatches.length >= totalMatches) break;
+      const four = players.slice(i, i+4);
+      if (four.length === 4) {
+        fallbackMatches.push({
+          id: fallbackMatches.length + 1,
+          t1: [four[0], four[1]],
+          t2: [four[2], four[3]],
+          out: []
+        });
       }
     }
-    bestSolution = selected.slice(0, totalMatches);
+    return fallbackMatches;
   }
 
-  // Re-index and add IDs
-  return bestSolution.map((m, idx) => ({
-    id: idx + 1,
-    t1: m.t1,
-    t2: m.t2,
-    out: []
-  }));
+  return bestSolution.map((m, idx) => ({ id: idx + 1, t1: m.t1, t2: m.t2, out: [] }));
 }
